@@ -10,5 +10,5 @@ window.SUPABASE_CONFIG = {
 // ex.: Render/Railway) — usada apenas para validar com segurança
 // que quem está usando a Mini App é realmente você no Telegram.
 window.API_CONFIG = {
-  baseUrl: 'https://finan-be08.onrender.com',
+  baseUrl: 'https://finan-b1ko.onrender.com',
 };
