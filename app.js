@@ -575,6 +575,49 @@ document.getElementById('formLancamento').addEventListener('submit', async (e) =
 
 let ultimasTransacoesCarregadas = [];
 
+function renderItemTransacao(t, modoEdicao) {
+  const responsavel = t.usuarios ? t.usuarios.nome : '🔁 Automático';
+
+  if (!modoEdicao) {
+    return `
+      <div class="item item-transacao" id="item-${t.id}">
+        <div class="item-linha-topo">
+          <span class="item-categoria">${t.categorias ? t.categorias.icone + ' ' + t.categorias.nome : 'Sem categoria'}</span>
+          <span class="item-valor ${t.tipo === 'receita' ? 'pos' : 'neg'}">${t.tipo === 'receita' ? '+' : '−'} ${formatarReais(t.valor)}</span>
+        </div>
+        ${t.descricao ? `<div class="item-descricao">${t.descricao}</div>` : ''}
+        <div class="item-rodape">
+          <span>${formatarData(t.data)} · ${responsavel}</span>
+          <div class="item-acoes">
+            <button class="botao-icone" onclick="editarTransacao('${t.id}')" title="Editar">✎</button>
+            <button class="botao-icone" onclick="excluirTransacao('${t.id}')" title="Excluir">✕</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const categoriasDoTipo = estado.categorias.filter((c) => c.tipo === t.tipo);
+  const opcoesCategoria = categoriasDoTipo
+    .map((c) => `<option value="${c.id}" ${c.id === t.categoria_id ? 'selected' : ''}>${c.icone} ${c.nome}</option>`)
+    .join('');
+
+  return `
+    <div class="item item-transacao" id="item-${t.id}">
+      <div class="item-linha-topo">
+        <select id="editCategoria-${t.id}" class="select-inline">${opcoesCategoria}</select>
+        <input type="number" step="0.01" min="0.01" id="editValor-${t.id}" class="input-inline-valor" value="${t.valor}" />
+      </div>
+      <input type="text" id="editDescricao-${t.id}" class="input-inline-descricao" placeholder="Descrição (opcional)" value="${(t.descricao || '').replace(/"/g, '&quot;')}" />
+      <div class="item-rodape">
+        <span>${formatarData(t.data)} · ${responsavel}</span>
+        <div class="item-acoes">
+          <button class="botao-icone" onclick="salvarEdicaoTransacao('${t.id}')" title="Salvar">✓</button>
+          <button class="botao-icone" onclick="cancelarEdicaoTransacao('${t.id}')" title="Cancelar">⨯</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function carregarTransacoes() {
   const mesInput = document.getElementById('filtroMesTransacoes').value; // "YYYY-MM"
   const [ano, mes] = mesInput.split('-').map(Number);
@@ -595,25 +638,8 @@ async function carregarTransacoes() {
   ultimasTransacoesCarregadas = transacoes || [];
 
   const container = document.getElementById('listaTransacoes');
-  container.innerHTML = (transacoes || []).length
-    ? transacoes.map((t) => {
-        const responsavel = t.usuarios ? t.usuarios.nome : '🔁 Automático';
-        return `
-        <div class="item item-transacao">
-          <div class="item-linha-topo">
-            <span class="item-categoria" id="categoriaTexto-${t.id}">${t.categorias ? t.categorias.icone + ' ' + t.categorias.nome : 'Sem categoria'}</span>
-            <span class="item-valor ${t.tipo === 'receita' ? 'pos' : 'neg'}">${t.tipo === 'receita' ? '+' : '−'} ${formatarReais(t.valor)}</span>
-          </div>
-          ${t.descricao ? `<div class="item-descricao">${t.descricao}</div>` : ''}
-          <div class="item-rodape">
-            <span>${formatarData(t.data)} · ${responsavel}</span>
-            <div class="item-acoes">
-              <button class="botao-icone" onclick="editarCategoriaTransacao('${t.id}')" title="Trocar categoria">✎</button>
-              <button class="botao-icone" onclick="excluirTransacao('${t.id}')" title="Excluir">✕</button>
-            </div>
-          </div>
-        </div>`;
-      }).join('')
+  container.innerHTML = ultimasTransacoesCarregadas.length
+    ? ultimasTransacoesCarregadas.map((t) => renderItemTransacao(t, false)).join('')
     : '<div class="vazio">Nenhum lançamento nesse mês.</div>';
 }
 
@@ -624,27 +650,32 @@ async function excluirTransacao(id) {
   carregarTransacoes();
 }
 
-// Troca o texto da categoria por um <select>, com o mesmo tipo
-// (despesa/receita) do lançamento, pra escolher a categoria nova.
-function editarCategoriaTransacao(id) {
+function editarTransacao(id) {
   const transacao = ultimasTransacoesCarregadas.find((t) => t.id === id);
   if (!transacao) return;
-
-  const categoriasDoTipo = estado.categorias.filter((c) => c.tipo === transacao.tipo);
-  const opcoes = categoriasDoTipo
-    .map((c) => `<option value="${c.id}" ${c.id === transacao.categoria_id ? 'selected' : ''}>${c.icone} ${c.nome}</option>`)
-    .join('');
-
-  const alvo = document.getElementById(`categoriaTexto-${id}`);
-  alvo.innerHTML = `
-    <select id="selectCategoria-${id}" class="select-inline">${opcoes}</select>
-    <button type="button" class="botao-icone" onclick="salvarCategoriaTransacao('${id}')" title="Confirmar">✓</button>`;
+  const item = document.getElementById(`item-${id}`);
+  item.outerHTML = renderItemTransacao(transacao, true);
+  document.getElementById(`editValor-${id}`).focus();
 }
 
-async function salvarCategoriaTransacao(id) {
-  const select = document.getElementById(`selectCategoria-${id}`);
-  if (!select) return;
-  await supabaseClient.from('transacoes').update({ categoria_id: select.value }).eq('id', id);
+function cancelarEdicaoTransacao(id) {
+  const transacao = ultimasTransacoesCarregadas.find((t) => t.id === id);
+  if (!transacao) return;
+  const item = document.getElementById(`item-${id}`);
+  item.outerHTML = renderItemTransacao(transacao, false);
+}
+
+async function salvarEdicaoTransacao(id) {
+  const categoriaId = document.getElementById(`editCategoria-${id}`).value;
+  const valor = parseFloat(document.getElementById(`editValor-${id}`).value);
+  const descricao = document.getElementById(`editDescricao-${id}`).value || null;
+
+  if (isNaN(valor) || valor <= 0) {
+    if (tg && tg.showAlert) tg.showAlert('Valor inválido.'); else alert('Valor inválido.');
+    return;
+  }
+
+  await supabaseClient.from('transacoes').update({ categoria_id: categoriaId, valor, descricao }).eq('id', id);
   if (tg) tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
   carregarTransacoes();
 }
