@@ -170,91 +170,88 @@ async function carregarPainel() {
   await desenharGraficoEvolucao();
   await carregarMetasResumo();
   await carregarContasResumo();
-  await carregarMetaEconomiaPainel(receitas - despesas);
+  await carregarMetasEconomiaPainel();
 }
 
 // ------------------------------------------------------------
-// META DE ECONOMIA (geral, não por categoria)
+// METAS DE ECONOMIA (nomeadas, ex.: "Casamento", "Carro")
 // ------------------------------------------------------------
-async function carregarMetaEconomiaPainel(saldoAtual) {
-  const { data: meta } = await supabaseClient
-    .from('metas')
+function renderMetaEconomiaItem(m, comAcoes) {
+  const percentual = Math.min((Number(m.valor_guardado) / Number(m.valor_alvo)) * 100, 100);
+  const atingida = Number(m.valor_guardado) >= Number(m.valor_alvo);
+  const acoes = comAcoes
+    ? `<div class="item-acoes">
+         <button class="botao-icone" onclick="pedirContribuicao('${m.id}', '${m.nome.replace(/'/g, "\\'")}')" title="Guardar mais">＋</button>
+         <button class="botao-icone" onclick="excluirMetaEconomia('${m.id}')" title="Excluir">✕</button>
+       </div>`
+    : '';
+  return `
+    <div class="item meta-item">
+      <div class="meta-topo">
+        <span>${atingida ? '🎯' : '🐖'} ${m.nome}</span>
+        <span>${formatarReais(m.valor_guardado)} / ${formatarReais(m.valor_alvo)}</span>
+      </div>
+      <div class="barra"><div class="barra-preenchida ${atingida ? '' : ''}" style="width:${percentual}%"></div></div>
+      ${acoes}
+    </div>`;
+}
+
+async function carregarMetasEconomiaPainel() {
+  const { data: metas } = await supabaseClient
+    .from('metas_economia')
     .select('*')
     .eq('grupo_id', estado.grupoId)
-    .eq('tipo', 'economia')
-    .is('categoria_id', null)
-    .maybeSingle();
+    .order('criado_em');
 
-  const cartao = document.getElementById('cartaoMetaEconomia');
-  if (!meta) {
-    cartao.hidden = true;
+  const bloco = document.getElementById('blocoMetasEconomiaPainel');
+  if (!metas || metas.length === 0) {
+    bloco.hidden = true;
     return;
   }
-  cartao.hidden = false;
-  const percentual = Math.min((saldoAtual / Number(meta.valor_alvo)) * 100, 100);
-  document.getElementById('economiaTexto').textContent = `${formatarReais(saldoAtual)} / ${formatarReais(meta.valor_alvo)}`;
-  const barra = document.getElementById('economiaBarra');
-  barra.style.width = `${Math.max(percentual, 0)}%`;
-  barra.classList.toggle('estourou', percentual < 0);
+  bloco.hidden = false;
+  document.getElementById('listaMetasEconomiaPainel').innerHTML = metas.map((m) => renderMetaEconomiaItem(m, false)).join('');
 }
 
 document.getElementById('formMetaEconomia').addEventListener('submit', async (e) => {
   e.preventDefault();
+  const nome = document.getElementById('nomeMetaEconomia').value.trim();
   const valorAlvo = parseFloat(document.getElementById('valorMetaEconomia').value);
 
-  const { data: existente } = await supabaseClient
-    .from('metas')
-    .select('id')
-    .eq('grupo_id', estado.grupoId)
-    .eq('tipo', 'economia')
-    .is('categoria_id', null)
-    .maybeSingle();
-
-  if (existente) {
-    await supabaseClient.from('metas').update({ valor_alvo: valorAlvo }).eq('id', existente.id);
-  } else {
-    await supabaseClient.from('metas').insert({ grupo_id: estado.grupoId, categoria_id: null, tipo: 'economia', valor_alvo: valorAlvo });
-  }
+  await supabaseClient.from('metas_economia').insert({ grupo_id: estado.grupoId, nome, valor_alvo: valorAlvo, valor_guardado: 0 });
 
   e.target.reset();
   carregarMetaEconomiaLista();
 });
 
 async function carregarMetaEconomiaLista() {
-  const { data: meta } = await supabaseClient
-    .from('metas')
+  const { data: metas } = await supabaseClient
+    .from('metas_economia')
     .select('*')
     .eq('grupo_id', estado.grupoId)
-    .eq('tipo', 'economia')
-    .is('categoria_id', null)
-    .maybeSingle();
-
-  const { receitas, despesas } = await (async () => {
-    const { data } = await supabaseClient
-      .from('transacoes')
-      .select('valor, tipo')
-      .eq('grupo_id', estado.grupoId)
-      .gte('data', inicioDoMes());
-    const r = (data || []).filter((t) => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor), 0);
-    const d = (data || []).filter((t) => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor), 0);
-    return { receitas: r, despesas: d };
-  })();
+    .order('criado_em');
 
   const container = document.getElementById('listaMetaEconomia');
-  if (!meta) {
-    container.innerHTML = '<div class="vazio">Nenhuma meta de economia definida ainda.</div>';
-    return;
-  }
-  const saldo = receitas - despesas;
-  const percentual = Math.min((saldo / Number(meta.valor_alvo)) * 100, 100);
-  container.innerHTML = `
-    <div class="item meta-item">
-      <div class="meta-topo">
-        <span>🐖 Guardado este mês</span>
-        <span>${formatarReais(saldo)} / ${formatarReais(meta.valor_alvo)}</span>
-      </div>
-      <div class="barra"><div class="barra-preenchida ${percentual < 100 && saldo < 0 ? 'estourou' : ''}" style="width:${Math.max(percentual, 0)}%"></div></div>
-    </div>`;
+  container.innerHTML = (metas || []).length
+    ? metas.map((m) => renderMetaEconomiaItem(m, true)).join('')
+    : '<div class="vazio">Nenhuma meta de economia ainda. Crie uma acima.</div>';
+}
+
+async function pedirContribuicao(metaId, nomeMeta) {
+  const valorTexto = prompt(`Quanto guardar em "${nomeMeta}"?`);
+  if (!valorTexto) return;
+  const valor = parseFloat(valorTexto.replace(',', '.'));
+  if (isNaN(valor) || valor <= 0) return;
+
+  const { data: meta } = await supabaseClient.from('metas_economia').select('valor_guardado').eq('id', metaId).single();
+  await supabaseClient.from('metas_economia').update({ valor_guardado: Number(meta.valor_guardado) + valor }).eq('id', metaId);
+
+  if (tg) tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
+  carregarMetaEconomiaLista();
+}
+
+async function excluirMetaEconomia(id) {
+  await supabaseClient.from('metas_economia').delete().eq('id', id);
+  carregarMetaEconomiaLista();
 }
 
 // ------------------------------------------------------------
