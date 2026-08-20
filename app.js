@@ -8,7 +8,7 @@ if (tg) {
   tg.expand();
 }
 
-const supabase = window.supabase.createClient(
+const supabaseClient = window.supabase.createClient(
   window.SUPABASE_CONFIG.url,
   window.SUPABASE_CONFIG.anonKey
 );
@@ -82,7 +82,7 @@ async function carregarUsuario() {
 
   // Modo simplificado (sem validação de assinatura) — usado quando a
   // API ainda não foi configurada em config.js.
-  const { data: usuario, error } = await supabase
+  const { data: usuario, error } = await supabaseClient
     .from('usuarios')
     .select('*, grupos(*)')
     .eq('telegram_id', telegramUser.id)
@@ -121,7 +121,7 @@ document.querySelectorAll('.tab').forEach((botao) => {
 // Categorias (compartilhado entre abas)
 // ------------------------------------------------------------
 async function carregarCategorias() {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('categorias')
     .select('*')
     .eq('grupo_id', estado.grupoId)
@@ -153,7 +153,7 @@ function preencherSelectsCategoria() {
 let graficoCategoria, graficoEvolucao;
 
 async function carregarPainel() {
-  const { data: transacoesMes } = await supabase
+  const { data: transacoesMes } = await supabaseClient
     .from('transacoes')
     .select('valor, tipo, categoria_id, categorias(nome, cor, icone)')
     .eq('grupo_id', estado.grupoId)
@@ -177,7 +177,7 @@ async function carregarPainel() {
 // META DE ECONOMIA (geral, não por categoria)
 // ------------------------------------------------------------
 async function carregarMetaEconomiaPainel(saldoAtual) {
-  const { data: meta } = await supabase
+  const { data: meta } = await supabaseClient
     .from('metas')
     .select('*')
     .eq('grupo_id', estado.grupoId)
@@ -202,7 +202,7 @@ document.getElementById('formMetaEconomia').addEventListener('submit', async (e)
   e.preventDefault();
   const valorAlvo = parseFloat(document.getElementById('valorMetaEconomia').value);
 
-  const { data: existente } = await supabase
+  const { data: existente } = await supabaseClient
     .from('metas')
     .select('id')
     .eq('grupo_id', estado.grupoId)
@@ -211,9 +211,9 @@ document.getElementById('formMetaEconomia').addEventListener('submit', async (e)
     .maybeSingle();
 
   if (existente) {
-    await supabase.from('metas').update({ valor_alvo: valorAlvo }).eq('id', existente.id);
+    await supabaseClient.from('metas').update({ valor_alvo: valorAlvo }).eq('id', existente.id);
   } else {
-    await supabase.from('metas').insert({ grupo_id: estado.grupoId, categoria_id: null, tipo: 'economia', valor_alvo: valorAlvo });
+    await supabaseClient.from('metas').insert({ grupo_id: estado.grupoId, categoria_id: null, tipo: 'economia', valor_alvo: valorAlvo });
   }
 
   e.target.reset();
@@ -221,7 +221,7 @@ document.getElementById('formMetaEconomia').addEventListener('submit', async (e)
 });
 
 async function carregarMetaEconomiaLista() {
-  const { data: meta } = await supabase
+  const { data: meta } = await supabaseClient
     .from('metas')
     .select('*')
     .eq('grupo_id', estado.grupoId)
@@ -230,7 +230,7 @@ async function carregarMetaEconomiaLista() {
     .maybeSingle();
 
   const { receitas, despesas } = await (async () => {
-    const { data } = await supabase
+    const { data } = await supabaseClient
       .from('transacoes')
       .select('valor, tipo')
       .eq('grupo_id', estado.grupoId)
@@ -261,7 +261,7 @@ async function carregarMetaEconomiaLista() {
 // EXPORTAR CSV
 // ------------------------------------------------------------
 document.getElementById('botaoExportarCsv').addEventListener('click', async () => {
-  const { data: transacoes } = await supabase
+  const { data: transacoes } = await supabaseClient
     .from('transacoes')
     .select('data, tipo, valor, descricao, categorias(nome)')
     .eq('grupo_id', estado.grupoId)
@@ -341,7 +341,7 @@ async function desenharGraficoEvolucao() {
   }
   const inicio = meses[0].toISOString().slice(0, 10);
 
-  const { data: transacoes } = await supabase
+  const { data: transacoes } = await supabaseClient
     .from('transacoes')
     .select('valor, tipo, data')
     .eq('grupo_id', estado.grupoId)
@@ -392,7 +392,7 @@ async function carregarContasResumo() {
   const limite = new Date();
   limite.setDate(limite.getDate() + 14);
 
-  const { data: contas } = await supabase
+  const { data: contas } = await supabaseClient
     .from('contas_a_pagar')
     .select('*')
     .eq('grupo_id', estado.grupoId)
@@ -431,7 +431,7 @@ document.getElementById('formLancamento').addEventListener('submit', async (e) =
   const categoriaId = document.getElementById('categoriaLancamento').value;
   const descricao = document.getElementById('descricaoLancamento').value || null;
 
-  await supabase.from('transacoes').insert({
+  await supabaseClient.from('transacoes').insert({
     grupo_id: estado.grupoId,
     usuario_id: estado.usuario.id,
     categoria_id: categoriaId,
@@ -450,7 +450,7 @@ document.getElementById('formLancamento').addEventListener('submit', async (e) =
 });
 
 async function carregarTransacoes() {
-  const { data: transacoes } = await supabase
+  const { data: transacoes } = await supabaseClient
     .from('transacoes')
     .select('*, categorias(nome, icone)')
     .eq('grupo_id', estado.grupoId)
@@ -475,7 +475,7 @@ async function carregarTransacoes() {
 }
 
 async function excluirTransacao(id) {
-  await supabase.from('transacoes').delete().eq('id', id);
+  await supabaseClient.from('transacoes').delete().eq('id', id);
   carregarTransacoes();
 }
 
@@ -487,7 +487,7 @@ document.getElementById('formMeta').addEventListener('submit', async (e) => {
   const categoriaId = document.getElementById('categoriaMeta').value;
   const valorAlvo = parseFloat(document.getElementById('valorMeta').value);
 
-  await supabase
+  await supabaseClient
     .from('metas')
     .upsert(
       { grupo_id: estado.grupoId, categoria_id: categoriaId, valor_alvo: valorAlvo, tipo: 'orcamento' },
@@ -499,13 +499,13 @@ document.getElementById('formMeta').addEventListener('submit', async (e) => {
 });
 
 async function buscarMetasComProgresso() {
-  const { data: metas } = await supabase
+  const { data: metas } = await supabaseClient
     .from('metas')
     .select('*, categorias(nome, icone)')
     .eq('grupo_id', estado.grupoId)
     .eq('tipo', 'orcamento');
 
-  const { data: transacoesMes } = await supabase
+  const { data: transacoesMes } = await supabaseClient
     .from('transacoes')
     .select('valor, categoria_id')
     .eq('grupo_id', estado.grupoId)
@@ -550,7 +550,7 @@ document.getElementById('formConta').addEventListener('submit', async (e) => {
   const vencimento = document.getElementById('vencimentoConta').value;
   const recorrente = document.getElementById('recorrenteConta').checked;
 
-  await supabase.from('contas_a_pagar').insert({
+  await supabaseClient.from('contas_a_pagar').insert({
     grupo_id: estado.grupoId,
     descricao,
     valor,
@@ -563,7 +563,7 @@ document.getElementById('formConta').addEventListener('submit', async (e) => {
 });
 
 async function carregarContas() {
-  const { data: contas } = await supabase
+  const { data: contas } = await supabaseClient
     .from('contas_a_pagar')
     .select('*')
     .eq('grupo_id', estado.grupoId)
@@ -587,12 +587,12 @@ async function carregarContas() {
 }
 
 async function marcarContaPaga(id) {
-  await supabase.from('contas_a_pagar').update({ status: 'paga' }).eq('id', id);
+  await supabaseClient.from('contas_a_pagar').update({ status: 'paga' }).eq('id', id);
   carregarContas();
 }
 
 async function excluirConta(id) {
-  await supabase.from('contas_a_pagar').delete().eq('id', id);
+  await supabaseClient.from('contas_a_pagar').delete().eq('id', id);
   carregarContas();
 }
 
@@ -611,7 +611,7 @@ document.getElementById('formCategoria').addEventListener('submit', async (e) =>
   const nome = document.getElementById('nomeCategoria').value;
   const tipo = document.getElementById('tipoCategoria').value;
 
-  await supabase.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor: '#6C63FF', icone: '🏷️' });
+  await supabaseClient.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor: '#6C63FF', icone: '🏷️' });
 
   e.target.reset();
   await carregarCategorias();
