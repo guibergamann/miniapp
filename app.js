@@ -573,6 +573,8 @@ document.getElementById('formLancamento').addEventListener('submit', async (e) =
   carregarTransacoes();
 });
 
+let ultimasTransacoesCarregadas = [];
+
 async function carregarTransacoes() {
   const mesInput = document.getElementById('filtroMesTransacoes').value; // "YYYY-MM"
   const [ano, mes] = mesInput.split('-').map(Number);
@@ -590,6 +592,8 @@ async function carregarTransacoes() {
     .order('data', { ascending: false })
     .order('criado_em', { ascending: false });
 
+  ultimasTransacoesCarregadas = transacoes || [];
+
   const container = document.getElementById('listaTransacoes');
   container.innerHTML = (transacoes || []).length
     ? transacoes.map((t) => {
@@ -597,13 +601,16 @@ async function carregarTransacoes() {
         return `
         <div class="item item-transacao">
           <div class="item-linha-topo">
-            <span class="item-categoria">${t.categorias ? t.categorias.icone + ' ' + t.categorias.nome : 'Sem categoria'}</span>
+            <span class="item-categoria" id="categoriaTexto-${t.id}">${t.categorias ? t.categorias.icone + ' ' + t.categorias.nome : 'Sem categoria'}</span>
             <span class="item-valor ${t.tipo === 'receita' ? 'pos' : 'neg'}">${t.tipo === 'receita' ? '+' : '−'} ${formatarReais(t.valor)}</span>
           </div>
           ${t.descricao ? `<div class="item-descricao">${t.descricao}</div>` : ''}
           <div class="item-rodape">
             <span>${formatarData(t.data)} · ${responsavel}</span>
-            <button class="botao-icone" onclick="excluirTransacao('${t.id}')">✕</button>
+            <div class="item-acoes">
+              <button class="botao-icone" onclick="editarCategoriaTransacao('${t.id}')" title="Trocar categoria">✎</button>
+              <button class="botao-icone" onclick="excluirTransacao('${t.id}')" title="Excluir">✕</button>
+            </div>
           </div>
         </div>`;
       }).join('')
@@ -614,6 +621,31 @@ document.getElementById('filtroMesTransacoes').addEventListener('change', carreg
 
 async function excluirTransacao(id) {
   await supabaseClient.from('transacoes').delete().eq('id', id);
+  carregarTransacoes();
+}
+
+// Troca o texto da categoria por um <select>, com o mesmo tipo
+// (despesa/receita) do lançamento, pra escolher a categoria nova.
+function editarCategoriaTransacao(id) {
+  const transacao = ultimasTransacoesCarregadas.find((t) => t.id === id);
+  if (!transacao) return;
+
+  const categoriasDoTipo = estado.categorias.filter((c) => c.tipo === transacao.tipo);
+  const opcoes = categoriasDoTipo
+    .map((c) => `<option value="${c.id}" ${c.id === transacao.categoria_id ? 'selected' : ''}>${c.icone} ${c.nome}</option>`)
+    .join('');
+
+  const alvo = document.getElementById(`categoriaTexto-${id}`);
+  alvo.innerHTML = `
+    <select id="selectCategoria-${id}" class="select-inline">${opcoes}</select>
+    <button type="button" class="botao-icone" onclick="salvarCategoriaTransacao('${id}')" title="Confirmar">✓</button>`;
+}
+
+async function salvarCategoriaTransacao(id) {
+  const select = document.getElementById(`selectCategoria-${id}`);
+  if (!select) return;
+  await supabaseClient.from('transacoes').update({ categoria_id: select.value }).eq('id', id);
+  if (tg) tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
   carregarTransacoes();
 }
 
