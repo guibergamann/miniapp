@@ -346,7 +346,7 @@ async function excluirMetaEconomia(id) {
 // permissão pra baixar arquivos direto do quadro (iframe) restrito
 // onde ela roda. Abrir o link com tg.openLink() usa o navegador de
 // verdade por fora desse quadro, onde o download funciona normal.
-function abrirExportacao(tipo) {
+async function abrirExportacao(tipo) {
   const { inicio, fim } = calcularIntervaloFiltro();
   const apiBaseUrl = window.API_CONFIG && window.API_CONFIG.baseUrl;
   const apiConfigurada = apiBaseUrl && !apiBaseUrl.includes('seu-bot');
@@ -360,7 +360,25 @@ function abrirExportacao(tipo) {
     return;
   }
 
-  const url = `${apiBaseUrl}/exportar/${tipo}?initData=${encodeURIComponent(initData)}&inicio=${inicio}&fim=${fim}`;
+  // Busca um token curto (o initData inteiro é grande demais pra ir
+  // direto na URL — ver o comentário em bot/api.js sobre isso).
+  let token;
+  try {
+    const resposta = await fetch(`${apiBaseUrl}/token-exportacao`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData }),
+    });
+    if (!resposta.ok) throw new Error('token_invalido');
+    ({ token } = await resposta.json());
+  } catch (err) {
+    console.warn('Não foi possível gerar o link de exportação, usando modo simplificado.', err);
+    if (tipo === 'csv') exportarCsvPeloNavegador(inicio, fim);
+    else exportarPdfPeloNavegador(inicio, fim);
+    return;
+  }
+
+  const url = `${apiBaseUrl}/exportar/${tipo}?token=${encodeURIComponent(token)}&inicio=${inicio}&fim=${fim}`;
   if (tg && tg.openLink) {
     tg.openLink(url);
   } else {
