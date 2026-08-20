@@ -166,6 +166,7 @@ function preencherSelectsCategoria() {
   const selDespesaLancamento = document.getElementById('categoriaLancamento');
   const selMeta = document.getElementById('categoriaMeta');
   const selRecorrencia = document.getElementById('categoriaRecorrencia');
+  const selParcelamento = document.getElementById('categoriaParcelamento');
   const tipoAtual = document.getElementById('tipoLancamento').value;
   const tipoRecorrenciaAtual = document.getElementById('tipoRecorrencia').value;
 
@@ -178,6 +179,7 @@ function preencherSelectsCategoria() {
   selDespesaLancamento.innerHTML = opcoes(tipoAtual);
   selMeta.innerHTML = opcoes('despesa');
   selRecorrencia.innerHTML = opcoes(tipoRecorrenciaAtual);
+  selParcelamento.innerHTML = opcoes('despesa');
 }
 
 // ------------------------------------------------------------
@@ -210,6 +212,7 @@ function calcularIntervaloFiltro() {
 
 document.getElementById('filtroMes').addEventListener('change', carregarPainel);
 document.getElementById('filtroSemana').addEventListener('change', carregarPainel);
+document.getElementById('filtroPeriodoEvolucao').addEventListener('change', desenharGraficoEvolucao);
 
 async function carregarPainel() {
   const { inicio, fim } = calcularIntervaloFiltro();
@@ -234,6 +237,24 @@ async function carregarPainel() {
   await carregarMetasResumo(inicio, fim);
   await carregarContasResumo();
   await carregarMetasEconomiaPainel();
+  await carregarSaldoTotalGeral();
+}
+
+// Saldo desde o início de uso do app (todas as transações, sem filtro de período).
+async function carregarSaldoTotalGeral() {
+  const { data: todas } = await supabaseClient
+    .from('transacoes')
+    .select('valor, tipo')
+    .eq('grupo_id', estado.grupoId);
+
+  const receitas = (todas || []).filter((t) => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor), 0);
+  const despesas = (todas || []).filter((t) => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor), 0);
+  const saldo = receitas - despesas;
+
+  const elemento = document.getElementById('saldoTotalGeral');
+  elemento.textContent = formatarReais(saldo);
+  elemento.classList.toggle('pos', saldo >= 0);
+  elemento.classList.toggle('neg', saldo < 0);
 }
 
 // ------------------------------------------------------------
@@ -358,6 +379,73 @@ document.getElementById('botaoExportarCsv').addEventListener('click', async () =
   URL.revokeObjectURL(url);
 });
 
+document.getElementById('botaoExportarPdf').addEventListener('click', async () => {
+  const { inicio, fim } = calcularIntervaloFiltro();
+  const { data: transacoes } = await supabaseClient
+    .from('transacoes')
+    .select('data, tipo, valor, descricao, categorias(nome), usuarios(nome)')
+    .eq('grupo_id', estado.grupoId)
+    .gte('data', inicio)
+    .lte('data', fim)
+    .order('data');
+
+  if (!transacoes || transacoes.length === 0) {
+    if (tg) tg.showAlert ? tg.showAlert('Nenhum lançamento nesse período para exportar.') : alert('Nenhum lançamento nesse período para exportar.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y = 18;
+
+  doc.setFontSize(16);
+  doc.text('Livro-Caixa — Relatório financeiro', 14, y);
+  y += 8;
+  doc.setFontSize(10);
+  doc.setTextColor(100);
+  doc.text(`Período: ${formatarData(inicio)} a ${formatarData(fim)}`, 14, y);
+  y += 10;
+
+  const receitas = transacoes.filter((t) => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor), 0);
+  const despesas = transacoes.filter((t) => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor), 0);
+
+  doc.setTextColor(0);
+  doc.setFontSize(11);
+  doc.text(`Receitas: ${formatarReais(receitas)}`, 14, y);
+  y += 6;
+  doc.text(`Despesas: ${formatarReais(despesas)}`, 14, y);
+  y += 6;
+  doc.setFont(undefined, 'bold');
+  doc.text(`Saldo do período: ${formatarReais(receitas - despesas)}`, 14, y);
+  doc.setFont(undefined, 'normal');
+  y += 12;
+
+  doc.setFontSize(12);
+  doc.text('Lançamentos', 14, y);
+  y += 7;
+  doc.setFontSize(9);
+
+  transacoes.forEach((t) => {
+    if (y > 280) {
+      doc.addPage();
+      y = 18;
+    }
+    const responsavel = t.usuarios ? t.usuarios.nome : 'Automático';
+    const categoria = t.categorias ? t.categorias.nome : 'Sem categoria';
+    const sinal = t.tipo === 'receita' ? '+' : '-';
+    doc.text(`${formatarData(t.data)}  ${categoria}  ${sinal} ${formatarReais(t.valor)}  (${responsavel})`, 14, y);
+    y += 5;
+    if (t.descricao) {
+      doc.setTextColor(120);
+      doc.text(`   ${t.descricao}`, 14, y);
+      doc.setTextColor(0);
+      y += 5;
+    }
+  });
+
+  doc.save(`relatorio-${inicio}-a-${fim}.pdf`);
+});
+
 // Gráfico de anel: verde = sobra depois da economia sugerida,
 // azul = economia sugerida, vermelho = gastos do período.
 async function desenharGraficoAnel(receitas, despesas) {
@@ -457,9 +545,10 @@ function desenharGraficoCategoria(transacoes) {
 }
 
 async function desenharGraficoEvolucao() {
+  const quantidadeMeses = parseInt(document.getElementById('filtroPeriodoEvolucao').value, 10) || 6;
   const meses = [];
   const hoje = new Date();
-  for (let i = 5; i >= 0; i--) {
+  for (let i = quantidadeMeses - 1; i >= 0; i--) {
     const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
     meses.push(d);
   }
@@ -482,7 +571,7 @@ async function desenharGraficoEvolucao() {
     else despesasPorMes[idx] += Number(t.valor);
   });
 
-  const labels = meses.map((d) => d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''));
+  const labels = meses.map((d) => d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }).replace('.', ''));
 
   if (graficoEvolucao) graficoEvolucao.destroy();
   const ctx = document.getElementById('graficoEvolucao').getContext('2d');
@@ -683,6 +772,9 @@ async function salvarEdicaoTransacao(id) {
 // ------------------------------------------------------------
 // LANÇAMENTOS RECORRENTES
 // ------------------------------------------------------------
+let recorrenciaEditandoId = null;
+let ultimasRecorrenciasCarregadas = [];
+
 document.getElementById('segmentoTipoRecorrencia').addEventListener('click', (e) => {
   const botao = e.target.closest('.segment-btn');
   if (!botao) return;
@@ -699,21 +791,59 @@ document.getElementById('formRecorrencia').addEventListener('submit', async (e) 
   const diaDoMes = parseInt(document.getElementById('diaRecorrencia').value, 10);
   const descricao = document.getElementById('descricaoRecorrencia').value || null;
 
-  await supabaseClient.from('recorrencias').insert({
-    grupo_id: estado.grupoId,
-    categoria_id: categoriaId,
-    tipo,
-    valor,
-    dia_do_mes: diaDoMes,
-    descricao,
-  });
+  if (recorrenciaEditandoId) {
+    await supabaseClient
+      .from('recorrencias')
+      .update({ categoria_id: categoriaId, tipo, valor, dia_do_mes: diaDoMes, descricao })
+      .eq('id', recorrenciaEditandoId);
+  } else {
+    await supabaseClient.from('recorrencias').insert({
+      grupo_id: estado.grupoId,
+      categoria_id: categoriaId,
+      tipo,
+      valor,
+      dia_do_mes: diaDoMes,
+      descricao,
+    });
+  }
 
-  e.target.reset();
-  document.getElementById('tipoRecorrencia').value = 'despesa';
-  document.querySelectorAll('#segmentoTipoRecorrencia .segment-btn').forEach((b, i) => b.classList.toggle('ativo', i === 0));
+  encerrarEdicaoRecorrencia();
   preencherSelectsCategoria();
   carregarRecorrencias();
 });
+
+document.getElementById('botaoCancelarEdicaoRecorrencia').addEventListener('click', () => {
+  encerrarEdicaoRecorrencia();
+});
+
+function encerrarEdicaoRecorrencia() {
+  recorrenciaEditandoId = null;
+  document.getElementById('formRecorrencia').reset();
+  document.getElementById('tipoRecorrencia').value = 'despesa';
+  document.querySelectorAll('#segmentoTipoRecorrencia .segment-btn').forEach((b, i) => b.classList.toggle('ativo', i === 0));
+  document.getElementById('botaoSubmitRecorrencia').textContent = 'Criar recorrência';
+  document.getElementById('botaoCancelarEdicaoRecorrencia').hidden = true;
+}
+
+function editarRecorrencia(id) {
+  const recorrencia = ultimasRecorrenciasCarregadas.find((r) => r.id === id);
+  if (!recorrencia) return;
+
+  recorrenciaEditandoId = id;
+  document.getElementById('tipoRecorrencia').value = recorrencia.tipo;
+  document.querySelectorAll('#segmentoTipoRecorrencia .segment-btn').forEach((b) => {
+    b.classList.toggle('ativo', b.dataset.tipo === recorrencia.tipo);
+  });
+  preencherSelectsCategoria();
+  document.getElementById('categoriaRecorrencia').value = recorrencia.categoria_id;
+  document.getElementById('valorRecorrencia').value = recorrencia.valor;
+  document.getElementById('diaRecorrencia').value = recorrencia.dia_do_mes;
+  document.getElementById('descricaoRecorrencia').value = recorrencia.descricao || '';
+
+  document.getElementById('botaoSubmitRecorrencia').textContent = 'Salvar alterações';
+  document.getElementById('botaoCancelarEdicaoRecorrencia').hidden = false;
+  document.getElementById('formRecorrencia').scrollIntoView({ behavior: 'smooth' });
+}
 
 async function carregarRecorrencias() {
   const { data: recorrencias } = await supabaseClient
@@ -723,9 +853,11 @@ async function carregarRecorrencias() {
     .eq('ativo', true)
     .order('dia_do_mes');
 
+  ultimasRecorrenciasCarregadas = recorrencias || [];
+
   const container = document.getElementById('listaRecorrencias');
-  container.innerHTML = (recorrencias || []).length
-    ? recorrencias.map((r) => `
+  container.innerHTML = ultimasRecorrenciasCarregadas.length
+    ? ultimasRecorrenciasCarregadas.map((r) => `
         <div class="item">
           <div class="item-principal">
             <div class="item-titulo">${r.categorias ? r.categorias.icone + ' ' + r.categorias.nome : ''}${r.descricao ? ' · ' + r.descricao : ''}</div>
@@ -733,7 +865,8 @@ async function carregarRecorrencias() {
           </div>
           <div class="item-valor ${r.tipo === 'receita' ? 'pos' : 'neg'}">${r.tipo === 'receita' ? '+' : '−'} ${formatarReais(r.valor)}</div>
           <div class="item-acoes">
-            <button class="botao-icone" onclick="excluirRecorrencia('${r.id}')">✕</button>
+            <button class="botao-icone" onclick="editarRecorrencia('${r.id}')" title="Editar">✎</button>
+            <button class="botao-icone" onclick="excluirRecorrencia('${r.id}')" title="Excluir">✕</button>
           </div>
         </div>`).join('')
     : '<div class="vazio">Nenhum lançamento recorrente ainda.</div>';
@@ -741,8 +874,50 @@ async function carregarRecorrencias() {
 
 async function excluirRecorrencia(id) {
   await supabaseClient.from('recorrencias').update({ ativo: false }).eq('id', id);
+  if (recorrenciaEditandoId === id) encerrarEdicaoRecorrencia();
   carregarRecorrencias();
 }
+
+// ------------------------------------------------------------
+// COMPRA PARCELADA
+// ------------------------------------------------------------
+document.getElementById('formParcelamento').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const categoriaId = document.getElementById('categoriaParcelamento').value;
+  const valorTotal = parseFloat(document.getElementById('valorTotalParcelamento').value);
+  const qtdParcelas = parseInt(document.getElementById('qtdParcelas').value, 10);
+  const desconto = parseFloat(document.getElementById('descontoPrimeiraParcela').value) || 0;
+  const descricaoBase = document.getElementById('descricaoParcelamento').value.trim();
+
+  if (!valorTotal || !qtdParcelas || qtdParcelas < 1) return;
+
+  const valorParcela = Math.round((valorTotal / qtdParcelas) * 100) / 100;
+  const hoje = new Date();
+
+  const linhas = [];
+  for (let i = 0; i < qtdParcelas; i++) {
+    const valor = i === 0 ? Math.max(Math.round((valorParcela - desconto) * 100) / 100, 0) : valorParcela;
+    const data = new Date(hoje.getFullYear(), hoje.getMonth() + i, hoje.getDate());
+    const descricaoParcela = `${descricaoBase ? descricaoBase + ' ' : ''}(parcela ${i + 1}/${qtdParcelas})`;
+
+    linhas.push({
+      grupo_id: estado.grupoId,
+      usuario_id: estado.usuario.id,
+      categoria_id: categoriaId,
+      tipo: 'despesa',
+      valor,
+      descricao: descricaoParcela,
+      data: data.toISOString().slice(0, 10),
+      origem: 'miniapp',
+    });
+  }
+
+  await supabaseClient.from('transacoes').insert(linhas);
+
+  e.target.reset();
+  if (tg) tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
+  carregarTransacoes();
+});
 
 // ------------------------------------------------------------
 // METAS
