@@ -13,8 +13,6 @@ const supabaseClient = window.supabase.createClient(
   window.SUPABASE_CONFIG.anonKey
 );
 
-const CORES_CATEGORIA = ['#1b4332', '#2d6a4f', '#40916c', '#74c69d', '#b23a48', '#c77f5e', '#7c7c7c'];
-
 const ICONES_DISPONIVEIS = [
   '🏷️', '🍽️', '🚗', '🏠', '💊', '🎉', '📚', '📦', '💼', '🧾', '➕',
   '🐾', '👕', '💻', '🎮', '✈️', '⛽', '🎁', '📱', '🧾', '🏋️', '💇',
@@ -23,6 +21,14 @@ const ICONES_DISPONIVEIS = [
 ];
 
 let iconeSelecionado = '🏷️';
+
+const CORES_PALETA = [
+  '#1b4332', '#2d6a4f', '#40916c', '#74c69d', '#95d5b2',
+  '#b23a48', '#e07a5f', '#f2994a', '#f2c94c', '#e8c1a0',
+  '#2f80ed', '#56ccf2', '#6c63ff', '#9b51e0', '#bb6bd9',
+  '#828282', '#4f4f4f', '#c77f5e', '#219653', '#eb5757',
+];
+let corSelecionada = CORES_PALETA[0];
 
 let estado = {
   usuario: null,
@@ -402,11 +408,14 @@ function desenharGraficoCategoria(transacoes) {
     .filter((t) => t.tipo === 'despesa')
     .forEach((t) => {
       const nome = t.categorias ? t.categorias.nome : 'Sem categoria';
-      porCategoria[nome] = (porCategoria[nome] || 0) + Number(t.valor);
+      const cor = t.categorias ? t.categorias.cor : '#828282';
+      if (!porCategoria[nome]) porCategoria[nome] = { total: 0, cor };
+      porCategoria[nome].total += Number(t.valor);
     });
 
   const labels = Object.keys(porCategoria);
-  const valores = Object.values(porCategoria);
+  const valores = labels.map((nome) => porCategoria[nome].total);
+  const cores = labels.map((nome) => porCategoria[nome].cor);
 
   if (graficoCategoria) graficoCategoria.destroy();
   const ctx = document.getElementById('graficoCategoria').getContext('2d');
@@ -424,7 +433,7 @@ function desenharGraficoCategoria(transacoes) {
     type: 'doughnut',
     data: {
       labels,
-      datasets: [{ data: valores, backgroundColor: CORES_CATEGORIA, borderWidth: 0 }],
+      datasets: [{ data: valores, backgroundColor: cores, borderWidth: 0 }],
     },
     options: {
       plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
@@ -550,29 +559,43 @@ document.getElementById('formLancamento').addEventListener('submit', async (e) =
 });
 
 async function carregarTransacoes() {
+  const mesInput = document.getElementById('filtroMesTransacoes').value; // "YYYY-MM"
+  const [ano, mes] = mesInput.split('-').map(Number);
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  const pad = (n) => String(n).padStart(2, '0');
+  const inicio = `${ano}-${pad(mes)}-01`;
+  const fim = `${ano}-${pad(mes)}-${pad(ultimoDia)}`;
+
   const { data: transacoes } = await supabaseClient
     .from('transacoes')
-    .select('*, categorias(nome, icone)')
+    .select('*, categorias(nome, icone), usuarios(nome)')
     .eq('grupo_id', estado.grupoId)
+    .gte('data', inicio)
+    .lte('data', fim)
     .order('data', { ascending: false })
-    .order('criado_em', { ascending: false })
-    .limit(30);
+    .order('criado_em', { ascending: false });
 
   const container = document.getElementById('listaTransacoes');
   container.innerHTML = (transacoes || []).length
-    ? transacoes.map((t) => `
-        <div class="item">
-          <div class="item-principal">
-            <div class="item-titulo">${t.categorias ? t.categorias.icone + ' ' + t.categorias.nome : 'Sem categoria'}${t.descricao ? ' · ' + t.descricao : ''}</div>
-            <div class="item-sub">${formatarData(t.data)}</div>
+    ? transacoes.map((t) => {
+        const responsavel = t.usuarios ? t.usuarios.nome : '🔁 Automático';
+        return `
+        <div class="item item-transacao">
+          <div class="item-linha-topo">
+            <span class="item-categoria">${t.categorias ? t.categorias.icone + ' ' + t.categorias.nome : 'Sem categoria'}</span>
+            <span class="item-valor ${t.tipo === 'receita' ? 'pos' : 'neg'}">${t.tipo === 'receita' ? '+' : '−'} ${formatarReais(t.valor)}</span>
           </div>
-          <div class="item-valor ${t.tipo === 'receita' ? 'pos' : 'neg'}">${t.tipo === 'receita' ? '+' : '−'} ${formatarReais(t.valor)}</div>
-          <div class="item-acoes">
+          ${t.descricao ? `<div class="item-descricao">${t.descricao}</div>` : ''}
+          <div class="item-rodape">
+            <span>${formatarData(t.data)} · ${responsavel}</span>
             <button class="botao-icone" onclick="excluirTransacao('${t.id}')">✕</button>
           </div>
-        </div>`).join('')
-    : '<div class="vazio">Nenhum lançamento ainda.</div>';
+        </div>`;
+      }).join('')
+    : '<div class="vazio">Nenhum lançamento nesse mês.</div>';
 }
+
+document.getElementById('filtroMesTransacoes').addEventListener('change', carregarTransacoes);
 
 async function excluirTransacao(id) {
   await supabaseClient.from('transacoes').delete().eq('id', id);
@@ -782,6 +805,22 @@ document.getElementById('seletorIcone').addEventListener('click', (e) => {
   document.getElementById('iconeCategoria').value = iconeSelecionado;
 });
 
+function renderSeletorCor() {
+  const container = document.getElementById('seletorCor');
+  container.innerHTML = CORES_PALETA.map(
+    (cor, i) => `<button type="button" class="cor-opcao${i === 0 ? ' selecionado' : ''}" data-cor="${cor}" style="background:${cor}"></button>`
+  ).join('');
+}
+renderSeletorCor();
+
+document.getElementById('seletorCor').addEventListener('click', (e) => {
+  const botao = e.target.closest('.cor-opcao');
+  if (!botao) return;
+  document.querySelectorAll('.cor-opcao').forEach((b) => b.classList.toggle('selecionado', b === botao));
+  corSelecionada = botao.dataset.cor;
+  document.getElementById('corCategoria').value = corSelecionada;
+});
+
 document.getElementById('segmentoTipoCategoria').addEventListener('click', (e) => {
   const botao = e.target.closest('.segment-btn');
   if (!botao) return;
@@ -794,13 +833,17 @@ document.getElementById('formCategoria').addEventListener('submit', async (e) =>
   const nome = document.getElementById('nomeCategoria').value;
   const tipo = document.getElementById('tipoCategoria').value;
   const icone = document.getElementById('iconeCategoria').value || '🏷️';
+  const cor = document.getElementById('corCategoria').value || CORES_PALETA[0];
 
-  await supabaseClient.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor: '#6C63FF', icone });
+  await supabaseClient.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor, icone });
 
   e.target.reset();
   document.querySelectorAll('.icone-opcao').forEach((b, i) => b.classList.toggle('selecionado', i === 0));
+  document.querySelectorAll('.cor-opcao').forEach((b, i) => b.classList.toggle('selecionado', i === 0));
   iconeSelecionado = ICONES_DISPONIVEIS[0];
+  corSelecionada = CORES_PALETA[0];
   document.getElementById('iconeCategoria').value = iconeSelecionado;
+  document.getElementById('corCategoria').value = corSelecionada;
   await carregarCategorias();
   carregarCategoriasView();
 });
@@ -808,11 +851,10 @@ document.getElementById('formCategoria').addEventListener('submit', async (e) =>
 function carregarCategoriasView() {
   const despesas = estado.categorias.filter((c) => c.tipo === 'despesa');
   const receitas = estado.categorias.filter((c) => c.tipo === 'receita');
+  const chip = (c) => `<div class="chip" style="border-left:4px solid ${c.cor}">${c.icone} ${c.nome}</div>`;
 
-  document.getElementById('listaCategoriasDespesa').innerHTML = despesas
-    .map((c) => `<div class="chip">${c.icone} ${c.nome}</div>`).join('') || '<div class="vazio">Nenhuma.</div>';
-  document.getElementById('listaCategoriasReceita').innerHTML = receitas
-    .map((c) => `<div class="chip">${c.icone} ${c.nome}</div>`).join('') || '<div class="vazio">Nenhuma.</div>';
+  document.getElementById('listaCategoriasDespesa').innerHTML = despesas.map(chip).join('') || '<div class="vazio">Nenhuma.</div>';
+  document.getElementById('listaCategoriasReceita').innerHTML = receitas.map(chip).join('') || '<div class="vazio">Nenhuma.</div>';
 }
 
 // ------------------------------------------------------------
@@ -820,7 +862,9 @@ function carregarCategoriasView() {
 // ------------------------------------------------------------
 (async function iniciar() {
   const hoje = new Date();
-  document.getElementById('filtroMes').value = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+  const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+  document.getElementById('filtroMes').value = mesAtual;
+  document.getElementById('filtroMesTransacoes').value = mesAtual;
 
   const ok = await carregarUsuario();
   if (!ok) return;
