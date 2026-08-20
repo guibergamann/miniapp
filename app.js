@@ -15,6 +15,15 @@ const supabaseClient = window.supabase.createClient(
 
 const CORES_CATEGORIA = ['#1b4332', '#2d6a4f', '#40916c', '#74c69d', '#b23a48', '#c77f5e', '#7c7c7c'];
 
+const ICONES_DISPONIVEIS = [
+  '🏷️', '🍽️', '🚗', '🏠', '💊', '🎉', '📚', '📦', '💼', '🧾', '➕',
+  '🐾', '👕', '💻', '🎮', '✈️', '⛽', '🎁', '📱', '🧾', '🏋️', '💇',
+  '🍺', '☕', '🚕', '🚌', '🏥', '🎓', '🧸', '🛒', '💡', '💧', '📺',
+  '🐶', '🐱', '🎵', '🛠️', '🧴', '🚬', '🍿', '💳',
+];
+
+let iconeSelecionado = '🏷️';
+
 let estado = {
   usuario: null,
   grupoId: null,
@@ -110,7 +119,7 @@ document.querySelectorAll('.tab').forEach((botao) => {
       secao.hidden = secao.dataset.view !== view;
     });
     if (view === 'painel') carregarPainel();
-    if (view === 'lancamentos') carregarTransacoes();
+    if (view === 'lancamentos') { carregarTransacoes(); carregarRecorrencias(); }
     if (view === 'metas') { carregarMetas(); carregarMetaEconomiaLista(); }
     if (view === 'contas') carregarContas();
     if (view === 'categorias') carregarCategoriasView();
@@ -135,7 +144,9 @@ async function carregarCategorias() {
 function preencherSelectsCategoria() {
   const selDespesaLancamento = document.getElementById('categoriaLancamento');
   const selMeta = document.getElementById('categoriaMeta');
+  const selRecorrencia = document.getElementById('categoriaRecorrencia');
   const tipoAtual = document.getElementById('tipoLancamento').value;
+  const tipoRecorrenciaAtual = document.getElementById('tipoRecorrencia').value;
 
   const opcoes = (tipo) =>
     estado.categorias
@@ -145,30 +156,61 @@ function preencherSelectsCategoria() {
 
   selDespesaLancamento.innerHTML = opcoes(tipoAtual);
   selMeta.innerHTML = opcoes('despesa');
+  selRecorrencia.innerHTML = opcoes(tipoRecorrenciaAtual);
 }
 
 // ------------------------------------------------------------
 // PAINEL
 // ------------------------------------------------------------
-let graficoCategoria, graficoEvolucao;
+let graficoCategoria, graficoEvolucao, graficoAnel;
+
+// Calcula o intervalo de datas (início/fim, "YYYY-MM-DD") a partir dos
+// filtros de mês e semana selecionados no topo do painel.
+function calcularIntervaloFiltro() {
+  const mesInput = document.getElementById('filtroMes').value; // "YYYY-MM"
+  const semana = document.getElementById('filtroSemana').value;
+  const [ano, mes] = mesInput.split('-').map(Number);
+  const ultimoDiaMes = new Date(ano, mes, 0).getDate();
+
+  let diaInicio = 1;
+  let diaFim = ultimoDiaMes;
+
+  if (semana === '1') { diaInicio = 1; diaFim = Math.min(7, ultimoDiaMes); }
+  else if (semana === '2') { diaInicio = 8; diaFim = Math.min(14, ultimoDiaMes); }
+  else if (semana === '3') { diaInicio = 15; diaFim = Math.min(21, ultimoDiaMes); }
+  else if (semana === '4') { diaInicio = 22; diaFim = ultimoDiaMes; }
+
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    inicio: `${ano}-${pad(mes)}-${pad(diaInicio)}`,
+    fim: `${ano}-${pad(mes)}-${pad(diaFim)}`,
+  };
+}
+
+document.getElementById('filtroMes').addEventListener('change', carregarPainel);
+document.getElementById('filtroSemana').addEventListener('change', carregarPainel);
 
 async function carregarPainel() {
-  const { data: transacoesMes } = await supabaseClient
+  const { inicio, fim } = calcularIntervaloFiltro();
+
+  const { data: transacoesPeriodo } = await supabaseClient
     .from('transacoes')
     .select('valor, tipo, categoria_id, categorias(nome, cor, icone)')
     .eq('grupo_id', estado.grupoId)
-    .gte('data', inicioDoMes());
+    .gte('data', inicio)
+    .lte('data', fim);
 
-  const receitas = (transacoesMes || []).filter((t) => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor), 0);
-  const despesas = (transacoesMes || []).filter((t) => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor), 0);
+  const receitas = (transacoesPeriodo || []).filter((t) => t.tipo === 'receita').reduce((s, t) => s + Number(t.valor), 0);
+  const despesas = (transacoesPeriodo || []).filter((t) => t.tipo === 'despesa').reduce((s, t) => s + Number(t.valor), 0);
 
   document.getElementById('saldoMes').textContent = formatarReais(receitas - despesas);
   document.getElementById('totalReceitas').textContent = formatarReais(receitas);
   document.getElementById('totalDespesas').textContent = formatarReais(despesas);
 
-  desenharGraficoCategoria(transacoesMes || []);
+  desenharGraficoCategoria(transacoesPeriodo || []);
+  await desenharGraficoAnel(receitas, despesas);
   await desenharGraficoEvolucao();
-  await carregarMetasResumo();
+  await carregarMetasResumo(inicio, fim);
   await carregarContasResumo();
   await carregarMetasEconomiaPainel();
 }
@@ -258,15 +300,17 @@ async function excluirMetaEconomia(id) {
 // EXPORTAR CSV
 // ------------------------------------------------------------
 document.getElementById('botaoExportarCsv').addEventListener('click', async () => {
+  const { inicio, fim } = calcularIntervaloFiltro();
   const { data: transacoes } = await supabaseClient
     .from('transacoes')
     .select('data, tipo, valor, descricao, categorias(nome)')
     .eq('grupo_id', estado.grupoId)
-    .gte('data', inicioDoMes())
+    .gte('data', inicio)
+    .lte('data', fim)
     .order('data');
 
   if (!transacoes || transacoes.length === 0) {
-    if (tg) tg.showAlert ? tg.showAlert('Nenhum lançamento este mês para exportar.') : alert('Nenhum lançamento este mês para exportar.');
+    if (tg) tg.showAlert ? tg.showAlert('Nenhum lançamento nesse período para exportar.') : alert('Nenhum lançamento nesse período para exportar.');
     return;
   }
 
@@ -286,12 +330,71 @@ document.getElementById('botaoExportarCsv').addEventListener('click', async () =
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `lancamentos-${new Date().toISOString().slice(0, 7)}.csv`;
+  link.download = `lancamentos-${inicio}-a-${fim}.csv`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 });
+
+// Gráfico de anel: verde = sobra depois da economia sugerida,
+// azul = economia sugerida, vermelho = gastos do período.
+async function desenharGraficoAnel(receitas, despesas) {
+  if (estado.percentualEconomia === undefined) {
+    const { data: grupo } = await supabaseClient
+      .from('grupos')
+      .select('percentual_economia_sugerida')
+      .eq('id', estado.grupoId)
+      .single();
+    estado.percentualEconomia = grupo ? Number(grupo.percentual_economia_sugerida) : 20;
+    document.getElementById('percentualEconomia').value = estado.percentualEconomia;
+  }
+
+  const sobra = Math.max(receitas - despesas, 0);
+  const economiaSugerida = sobra * (estado.percentualEconomia / 100);
+  const sobraFinal = Math.max(sobra - economiaSugerida, 0);
+
+  let dados, cores;
+  if (despesas >= receitas && receitas > 0) {
+    dados = [0, 0, despesas];
+    cores = ['#2d6a4f', '#2f80ed', '#b23a48'];
+  } else if (receitas === 0) {
+    dados = [0, 0, despesas || 0.0001];
+    cores = ['#2d6a4f', '#2f80ed', '#b23a48'];
+  } else {
+    dados = [sobraFinal, economiaSugerida, despesas];
+    cores = ['#2d6a4f', '#2f80ed', '#b23a48'];
+  }
+
+  if (graficoAnel) graficoAnel.destroy();
+  const ctx = document.getElementById('graficoAnel').getContext('2d');
+  graficoAnel = new Chart(ctx, {
+    type: 'doughnut',
+    data: { datasets: [{ data: dados, backgroundColor: cores, borderWidth: 0 }] },
+    options: {
+      cutout: '68%',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => formatarReais(ctx.raw),
+          },
+        },
+      },
+    },
+  });
+}
+
+document.getElementById('botaoSalvarPercentual').addEventListener('click', async () => {
+  const valor = parseFloat(document.getElementById('percentualEconomia').value);
+  if (isNaN(valor) || valor < 0 || valor > 100) return;
+
+  await supabaseClient.from('grupos').update({ percentual_economia_sugerida: valor }).eq('id', estado.grupoId);
+  estado.percentualEconomia = valor;
+  if (tg) tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success');
+  carregarPainel();
+});
+
 
 function desenharGraficoCategoria(transacoes) {
   const porCategoria = {};
@@ -375,9 +478,9 @@ async function desenharGraficoEvolucao() {
   });
 }
 
-async function carregarMetasResumo() {
+async function carregarMetasResumo(inicio, fim) {
   const container = document.getElementById('listaMetasPainel');
-  const metas = await buscarMetasComProgresso();
+  const metas = await buscarMetasComProgresso(inicio, fim);
   container.innerHTML = metas.length
     ? metas.map(renderMetaItem).join('')
     : '<div class="vazio">Nenhuma meta definida ainda. Configure na aba Metas.</div>';
@@ -477,6 +580,70 @@ async function excluirTransacao(id) {
 }
 
 // ------------------------------------------------------------
+// LANÇAMENTOS RECORRENTES
+// ------------------------------------------------------------
+document.getElementById('segmentoTipoRecorrencia').addEventListener('click', (e) => {
+  const botao = e.target.closest('.segment-btn');
+  if (!botao) return;
+  document.querySelectorAll('#segmentoTipoRecorrencia .segment-btn').forEach((b) => b.classList.toggle('ativo', b === botao));
+  document.getElementById('tipoRecorrencia').value = botao.dataset.tipo;
+  preencherSelectsCategoria();
+});
+
+document.getElementById('formRecorrencia').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tipo = document.getElementById('tipoRecorrencia').value;
+  const categoriaId = document.getElementById('categoriaRecorrencia').value;
+  const valor = parseFloat(document.getElementById('valorRecorrencia').value);
+  const diaDoMes = parseInt(document.getElementById('diaRecorrencia').value, 10);
+  const descricao = document.getElementById('descricaoRecorrencia').value || null;
+
+  await supabaseClient.from('recorrencias').insert({
+    grupo_id: estado.grupoId,
+    categoria_id: categoriaId,
+    tipo,
+    valor,
+    dia_do_mes: diaDoMes,
+    descricao,
+  });
+
+  e.target.reset();
+  document.getElementById('tipoRecorrencia').value = 'despesa';
+  document.querySelectorAll('#segmentoTipoRecorrencia .segment-btn').forEach((b, i) => b.classList.toggle('ativo', i === 0));
+  preencherSelectsCategoria();
+  carregarRecorrencias();
+});
+
+async function carregarRecorrencias() {
+  const { data: recorrencias } = await supabaseClient
+    .from('recorrencias')
+    .select('*, categorias(nome, icone)')
+    .eq('grupo_id', estado.grupoId)
+    .eq('ativo', true)
+    .order('dia_do_mes');
+
+  const container = document.getElementById('listaRecorrencias');
+  container.innerHTML = (recorrencias || []).length
+    ? recorrencias.map((r) => `
+        <div class="item">
+          <div class="item-principal">
+            <div class="item-titulo">${r.categorias ? r.categorias.icone + ' ' + r.categorias.nome : ''}${r.descricao ? ' · ' + r.descricao : ''}</div>
+            <div class="item-sub">todo dia ${r.dia_do_mes}</div>
+          </div>
+          <div class="item-valor ${r.tipo === 'receita' ? 'pos' : 'neg'}">${r.tipo === 'receita' ? '+' : '−'} ${formatarReais(r.valor)}</div>
+          <div class="item-acoes">
+            <button class="botao-icone" onclick="excluirRecorrencia('${r.id}')">✕</button>
+          </div>
+        </div>`).join('')
+    : '<div class="vazio">Nenhum lançamento recorrente ainda.</div>';
+}
+
+async function excluirRecorrencia(id) {
+  await supabaseClient.from('recorrencias').update({ ativo: false }).eq('id', id);
+  carregarRecorrencias();
+}
+
+// ------------------------------------------------------------
 // METAS
 // ------------------------------------------------------------
 document.getElementById('formMeta').addEventListener('submit', async (e) => {
@@ -495,19 +662,22 @@ document.getElementById('formMeta').addEventListener('submit', async (e) => {
   carregarMetas();
 });
 
-async function buscarMetasComProgresso() {
+async function buscarMetasComProgresso(inicio, fim) {
+  const inicioReal = inicio || inicioDoMes();
   const { data: metas } = await supabaseClient
     .from('metas')
     .select('*, categorias(nome, icone)')
     .eq('grupo_id', estado.grupoId)
     .eq('tipo', 'orcamento');
 
-  const { data: transacoesMes } = await supabaseClient
+  let query = supabaseClient
     .from('transacoes')
     .select('valor, categoria_id')
     .eq('grupo_id', estado.grupoId)
     .eq('tipo', 'despesa')
-    .gte('data', inicioDoMes());
+    .gte('data', inicioReal);
+  if (fim) query = query.lte('data', fim);
+  const { data: transacoesMes } = await query;
 
   return (metas || []).map((m) => {
     const gasto = (transacoesMes || [])
@@ -596,6 +766,22 @@ async function excluirConta(id) {
 // ------------------------------------------------------------
 // CATEGORIAS
 // ------------------------------------------------------------
+function renderSeletorIcone() {
+  const container = document.getElementById('seletorIcone');
+  container.innerHTML = ICONES_DISPONIVEIS.map(
+    (icone, i) => `<button type="button" class="icone-opcao${i === 0 ? ' selecionado' : ''}" data-icone="${icone}">${icone}</button>`
+  ).join('');
+}
+renderSeletorIcone();
+
+document.getElementById('seletorIcone').addEventListener('click', (e) => {
+  const botao = e.target.closest('.icone-opcao');
+  if (!botao) return;
+  document.querySelectorAll('.icone-opcao').forEach((b) => b.classList.toggle('selecionado', b === botao));
+  iconeSelecionado = botao.dataset.icone;
+  document.getElementById('iconeCategoria').value = iconeSelecionado;
+});
+
 document.getElementById('segmentoTipoCategoria').addEventListener('click', (e) => {
   const botao = e.target.closest('.segment-btn');
   if (!botao) return;
@@ -607,10 +793,14 @@ document.getElementById('formCategoria').addEventListener('submit', async (e) =>
   e.preventDefault();
   const nome = document.getElementById('nomeCategoria').value;
   const tipo = document.getElementById('tipoCategoria').value;
+  const icone = document.getElementById('iconeCategoria').value || '🏷️';
 
-  await supabaseClient.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor: '#6C63FF', icone: '🏷️' });
+  await supabaseClient.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor: '#6C63FF', icone });
 
   e.target.reset();
+  document.querySelectorAll('.icone-opcao').forEach((b, i) => b.classList.toggle('selecionado', i === 0));
+  iconeSelecionado = ICONES_DISPONIVEIS[0];
+  document.getElementById('iconeCategoria').value = iconeSelecionado;
   await carregarCategorias();
   carregarCategoriasView();
 });
@@ -629,6 +819,9 @@ function carregarCategoriasView() {
 // Inicialização
 // ------------------------------------------------------------
 (async function iniciar() {
+  const hoje = new Date();
+  document.getElementById('filtroMes').value = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+
   const ok = await carregarUsuario();
   if (!ok) return;
   await carregarCategorias();
