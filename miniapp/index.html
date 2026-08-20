@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Painel Financeiro</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">§</span>
+      <div>
+        <div class="brand-title">Livro-Caixa</div>
+        <div class="brand-sub" id="grupoNome">carregando…</div>
+      </div>
+    </div>
+  </header>
+
+  <main id="conteudo">
+
+    <!-- ===================== ABA: PAINEL ===================== -->
+    <section data-view="painel" class="view">
+      <div class="saldo-card">
+        <div class="saldo-linha">
+          <span class="rotulo">Saldo do mês</span>
+          <span class="valor-grande" id="saldoMes">R$ 0,00</span>
+        </div>
+        <div class="saldo-sub">
+          <span>Entradas <b id="totalReceitas" class="pos">R$ 0,00</b></span>
+          <span>Saídas <b id="totalDespesas" class="neg">R$ 0,00</b></span>
+        </div>
+        <button type="button" id="botaoExportarCsv" class="botao-secundario">⬇ Exportar lançamentos do mês (CSV)</button>
+      </div>
+
+      <div id="cartaoMetaEconomia" class="item meta-item" hidden>
+        <div class="meta-topo">
+          <span>🐖 Meta de economia</span>
+          <span id="economiaTexto">R$ 0,00 / R$ 0,00</span>
+        </div>
+        <div class="barra"><div class="barra-preenchida" id="economiaBarra" style="width:0%"></div></div>
+      </div>
+
+      <h2 class="secao-titulo">Gastos por categoria</h2>
+      <div class="grafico-caixa">
+        <canvas id="graficoCategoria"></canvas>
+      </div>
+
+      <h2 class="secao-titulo">Últimos 6 meses</h2>
+      <div class="grafico-caixa">
+        <canvas id="graficoEvolucao"></canvas>
+      </div>
+
+      <h2 class="secao-titulo">Metas do mês</h2>
+      <div id="listaMetasPainel" class="lista"></div>
+
+      <h2 class="secao-titulo">Próximas contas</h2>
+      <div id="listaContasPainel" class="lista"></div>
+    </section>
+
+    <!-- ===================== ABA: LANÇAMENTOS ===================== -->
+    <section data-view="lancamentos" class="view" hidden>
+      <form id="formLancamento" class="form-card">
+        <div class="segment" id="segmentoTipo">
+          <button type="button" class="segment-btn ativo" data-tipo="despesa">Despesa</button>
+          <button type="button" class="segment-btn" data-tipo="receita">Receita</button>
+        </div>
+        <input type="hidden" id="tipoLancamento" value="despesa" />
+
+        <label>Valor
+          <input type="number" step="0.01" min="0.01" id="valorLancamento" placeholder="0,00" required />
+        </label>
+
+        <label>Categoria
+          <select id="categoriaLancamento" required></select>
+        </label>
+
+        <label>Descrição (opcional)
+          <input type="text" id="descricaoLancamento" placeholder="Ex.: almoço com a equipe" />
+        </label>
+
+        <button type="submit" class="botao-principal">Lançar</button>
+      </form>
+
+      <h2 class="secao-titulo">Lançamentos recentes</h2>
+      <div id="listaTransacoes" class="lista"></div>
+    </section>
+
+    <!-- ===================== ABA: METAS ===================== -->
+    <section data-view="metas" class="view" hidden>
+      <h2 class="secao-titulo" style="margin-top:0">Meta de economia (geral)</h2>
+      <form id="formMetaEconomia" class="form-card">
+        <label>Quanto quer guardar por mês (receitas − despesas)
+          <input type="number" step="0.01" min="0.01" id="valorMetaEconomia" placeholder="0,00" required />
+        </label>
+        <button type="submit" class="botao-principal">Salvar meta de economia</button>
+      </form>
+      <div id="listaMetaEconomia" class="lista"></div>
+
+      <h2 class="secao-titulo">Orçamento por categoria</h2>
+      <form id="formMeta" class="form-card">
+        <label>Categoria
+          <select id="categoriaMeta" required></select>
+        </label>
+        <label>Orçamento mensal
+          <input type="number" step="0.01" min="0.01" id="valorMeta" placeholder="0,00" required />
+        </label>
+        <button type="submit" class="botao-principal">Salvar meta</button>
+      </form>
+
+      <h2 class="secao-titulo">Metas ativas</h2>
+      <div id="listaMetas" class="lista"></div>
+    </section>
+
+    <!-- ===================== ABA: CONTAS ===================== -->
+    <section data-view="contas" class="view" hidden>
+      <form id="formConta" class="form-card">
+        <label>Descrição
+          <input type="text" id="descricaoConta" placeholder="Ex.: Internet" required />
+        </label>
+        <label>Valor
+          <input type="number" step="0.01" min="0.01" id="valorConta" placeholder="0,00" required />
+        </label>
+        <label>Vencimento
+          <input type="date" id="vencimentoConta" required />
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="recorrenteConta" />
+          Repete todo mês
+        </label>
+        <button type="submit" class="botao-principal">Cadastrar conta</button>
+      </form>
+
+      <h2 class="secao-titulo">Todas as contas</h2>
+      <div id="listaContas" class="lista"></div>
+    </section>
+
+    <!-- ===================== ABA: CATEGORIAS ===================== -->
+    <section data-view="categorias" class="view" hidden>
+      <form id="formCategoria" class="form-card">
+        <label>Nome
+          <input type="text" id="nomeCategoria" placeholder="Ex.: Pet" required />
+        </label>
+        <div class="segment" id="segmentoTipoCategoria">
+          <button type="button" class="segment-btn ativo" data-tipo="despesa">Despesa</button>
+          <button type="button" class="segment-btn" data-tipo="receita">Receita</button>
+        </div>
+        <input type="hidden" id="tipoCategoria" value="despesa" />
+        <button type="submit" class="botao-principal">Criar categoria</button>
+      </form>
+
+      <h2 class="secao-titulo">Despesas</h2>
+      <div id="listaCategoriasDespesa" class="lista chips"></div>
+      <h2 class="secao-titulo">Receitas</h2>
+      <div id="listaCategoriasReceita" class="lista chips"></div>
+    </section>
+
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab ativo" data-view="painel">
+      <span class="tab-icon">◧</span>Painel
+    </button>
+    <button class="tab" data-view="lancamentos">
+      <span class="tab-icon">+</span>Lançar
+    </button>
+    <button class="tab" data-view="metas">
+      <span class="tab-icon">◔</span>Metas
+    </button>
+    <button class="tab" data-view="contas">
+      <span class="tab-icon">▤</span>Contas
+    </button>
+    <button class="tab" data-view="categorias">
+      <span class="tab-icon">▦</span>Categorias
+    </button>
+  </nav>
+
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
