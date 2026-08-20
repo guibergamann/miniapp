@@ -341,8 +341,39 @@ async function excluirMetaEconomia(id) {
 // ------------------------------------------------------------
 // EXPORTAR CSV
 // ------------------------------------------------------------
-document.getElementById('botaoExportarCsv').addEventListener('click', async () => {
+// As exportações rodam no servidor do bot (não mais no navegador),
+// porque a Mini App, quando aberta dentro do Telegram, não tem
+// permissão pra baixar arquivos direto do quadro (iframe) restrito
+// onde ela roda. Abrir o link com tg.openLink() usa o navegador de
+// verdade por fora desse quadro, onde o download funciona normal.
+function abrirExportacao(tipo) {
   const { inicio, fim } = calcularIntervaloFiltro();
+  const apiBaseUrl = window.API_CONFIG && window.API_CONFIG.baseUrl;
+  const apiConfigurada = apiBaseUrl && !apiBaseUrl.includes('seu-bot');
+  const initData = tg && tg.initData;
+
+  if (!apiConfigurada || !initData) {
+    // Sem a API configurada (ex.: testando fora do Telegram), cai no
+    // método antigo, que baixa direto pelo navegador.
+    if (tipo === 'csv') exportarCsvPeloNavegador(inicio, fim);
+    else exportarPdfPeloNavegador(inicio, fim);
+    return;
+  }
+
+  const url = `${apiBaseUrl}/exportar/${tipo}?initData=${encodeURIComponent(initData)}&inicio=${inicio}&fim=${fim}`;
+  if (tg && tg.openLink) {
+    tg.openLink(url);
+  } else {
+    window.open(url, '_blank');
+  }
+}
+
+document.getElementById('botaoExportarCsv').addEventListener('click', () => abrirExportacao('csv'));
+document.getElementById('botaoExportarPdf').addEventListener('click', () => abrirExportacao('pdf'));
+
+// --- Método antigo (gera o arquivo no próprio navegador) — só usado
+// como reserva quando a API do bot ainda não está configurada. ---
+async function exportarCsvPeloNavegador(inicio, fim) {
   const { data: transacoes } = await supabaseClient
     .from('transacoes')
     .select('data, tipo, valor, descricao, categorias(nome)')
@@ -377,10 +408,9 @@ document.getElementById('botaoExportarCsv').addEventListener('click', async () =
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-});
+}
 
-document.getElementById('botaoExportarPdf').addEventListener('click', async () => {
-  const { inicio, fim } = calcularIntervaloFiltro();
+async function exportarPdfPeloNavegador(inicio, fim) {
   const { data: transacoes } = await supabaseClient
     .from('transacoes')
     .select('data, tipo, valor, descricao, categorias(nome), usuarios(nome)')
@@ -444,7 +474,7 @@ document.getElementById('botaoExportarPdf').addEventListener('click', async () =
   });
 
   doc.save(`relatorio-${inicio}-a-${fim}.pdf`);
-});
+}
 
 // Gráfico de anel: verde = sobra depois da economia sugerida,
 // azul = economia sugerida, vermelho = gastos do período.
