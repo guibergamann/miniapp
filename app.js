@@ -29,6 +29,7 @@ const CORES_PALETA = [
   '#828282', '#4f4f4f', '#c77f5e', '#219653', '#eb5757',
 ];
 let corSelecionada = CORES_PALETA[0];
+let categoriaEditandoId = null;
 
 let estado = {
   usuario: null,
@@ -849,18 +850,57 @@ document.getElementById('formCategoria').addEventListener('submit', async (e) =>
   const icone = document.getElementById('iconeCategoria').value || '🏷️';
   const cor = document.getElementById('corCategoria').value || CORES_PALETA[0];
 
-  await supabaseClient.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor, icone });
+  if (categoriaEditandoId) {
+    await supabaseClient.from('categorias').update({ nome, tipo, cor, icone }).eq('id', categoriaEditandoId);
+  } else {
+    await supabaseClient.from('categorias').insert({ grupo_id: estado.grupoId, nome, tipo, cor, icone });
+  }
 
-  e.target.reset();
+  encerrarEdicaoCategoria();
+  await carregarCategorias();
+  carregarCategoriasView();
+});
+
+document.getElementById('botaoCancelarEdicaoCategoria').addEventListener('click', () => {
+  encerrarEdicaoCategoria();
+});
+
+function encerrarEdicaoCategoria() {
+  categoriaEditandoId = null;
+  document.getElementById('formCategoria').reset();
   document.querySelectorAll('.icone-opcao').forEach((b, i) => b.classList.toggle('selecionado', i === 0));
   document.querySelectorAll('.cor-opcao').forEach((b, i) => b.classList.toggle('selecionado', i === 0));
   iconeSelecionado = ICONES_DISPONIVEIS[0];
   corSelecionada = CORES_PALETA[0];
   document.getElementById('iconeCategoria').value = iconeSelecionado;
   document.getElementById('corCategoria').value = corSelecionada;
-  await carregarCategorias();
-  carregarCategoriasView();
-});
+  document.getElementById('botaoSubmitCategoria').textContent = 'Criar categoria';
+  document.getElementById('botaoCancelarEdicaoCategoria').hidden = true;
+}
+
+function editarCategoria(id) {
+  const categoria = estado.categorias.find((c) => c.id === id);
+  if (!categoria) return;
+
+  categoriaEditandoId = id;
+  document.getElementById('nomeCategoria').value = categoria.nome;
+  document.getElementById('tipoCategoria').value = categoria.tipo;
+  document.querySelectorAll('#segmentoTipoCategoria .segment-btn').forEach((b) => {
+    b.classList.toggle('ativo', b.dataset.tipo === categoria.tipo);
+  });
+
+  iconeSelecionado = categoria.icone;
+  document.getElementById('iconeCategoria').value = categoria.icone;
+  document.querySelectorAll('.icone-opcao').forEach((b) => b.classList.toggle('selecionado', b.dataset.icone === categoria.icone));
+
+  corSelecionada = categoria.cor;
+  document.getElementById('corCategoria').value = categoria.cor;
+  document.querySelectorAll('.cor-opcao').forEach((b) => b.classList.toggle('selecionado', b.dataset.cor === categoria.cor));
+
+  document.getElementById('botaoSubmitCategoria').textContent = 'Salvar alterações';
+  document.getElementById('botaoCancelarEdicaoCategoria').hidden = false;
+  document.getElementById('formCategoria').scrollIntoView({ behavior: 'smooth' });
+}
 
 function carregarCategoriasView() {
   const despesas = estado.categorias.filter((c) => c.tipo === 'despesa');
@@ -868,7 +908,8 @@ function carregarCategoriasView() {
   const chip = (c) => `
     <div class="chip" style="border-left:4px solid ${c.cor}">
       <span>${c.icone} ${c.nome}</span>
-      <button type="button" class="chip-remover" onclick="excluirCategoria('${c.id}')">✕</button>
+      <button type="button" class="chip-remover" onclick="editarCategoria('${c.id}')" title="Editar">✎</button>
+      <button type="button" class="chip-remover" onclick="excluirCategoria('${c.id}')" title="Excluir">✕</button>
     </div>`;
 
   document.getElementById('listaCategoriasDespesa').innerHTML = despesas.map(chip).join('') || '<div class="vazio">Nenhuma.</div>';
@@ -877,6 +918,7 @@ function carregarCategoriasView() {
 
 async function excluirCategoria(id) {
   await supabaseClient.from('categorias').delete().eq('id', id);
+  if (categoriaEditandoId === id) encerrarEdicaoCategoria();
   await carregarCategorias();
   carregarCategoriasView();
 }
