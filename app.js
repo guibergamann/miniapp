@@ -22,6 +22,26 @@ const ICONES_DISPONIVEIS = [
 
 let iconeSelecionado = '🏷️';
 
+// Avisa os outros membros do grupo quando um lançamento é criado pela
+// Mini App (o bot avisa sozinho quando o lançamento vem por texto/comando
+// — aqui é só pro caminho que passa direto pelo Supabase).
+async function notificarLancamentoAosOutros(tipo, valor, categoriaNome, descricao) {
+  const apiBaseUrl = window.API_CONFIG && window.API_CONFIG.baseUrl;
+  const apiConfigurada = apiBaseUrl && !apiBaseUrl.includes('seu-bot');
+  const initData = tg && tg.initData;
+  if (!apiConfigurada || !initData) return;
+
+  try {
+    await fetch(`${apiBaseUrl}/notificar-lancamento`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData, tipo, valor, categoriaNome, descricao }),
+    });
+  } catch (err) {
+    console.warn('Não foi possível avisar os outros membros do grupo.', err);
+  }
+}
+
 const CORES_PALETA = [
   '#1b4332', '#2d6a4f', '#40916c', '#74c69d', '#95d5b2',
   '#b23a48', '#e07a5f', '#f2994a', '#f2c94c', '#e8c1a0',
@@ -701,6 +721,9 @@ document.getElementById('formLancamento').addEventListener('submit', async (e) =
     descricao,
     origem: 'miniapp',
   });
+
+  const categoriaSelecionada = estado.categorias.find((c) => c.id === categoriaId);
+  notificarLancamentoAosOutros(tipo, valor, categoriaSelecionada ? categoriaSelecionada.nome : null, descricao);
 
   e.target.reset();
   document.getElementById('tipoLancamento').value = 'despesa';
